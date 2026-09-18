@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.DS_Store
+.pytest_cache/
+
+# Licensed / generated model files — do not commit
+data/deca_model.tar
+data/generic_model.pkl
+data/deca_mlx.safetensors
+data/FLAME2020/
+data/FLAME2020.zip
+data/FLAME_albedo_from_BFM.npz
+flame2020/
+
+outputs/
+*.obj
+!data/head_template.obj
+*.mtl

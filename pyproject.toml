@@ -1,0 +1,29 @@
+[project]
+name = "deca-mlx"
+version = "0.1.0"
+description = "Native MLX inference port of DECA"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "mlx",
+  "numpy",
+  "pillow",
+  "opencv-python-headless",
+  "scipy",
+  "scikit-image",
+  "safetensors",
+]
+
+[project.optional-dependencies]
+convert = ["torch"]
+dev = ["pytest"]
+
+[project.scripts]
+deca-mlx = "deca_mlx.demo:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["deca_mlx*"]
