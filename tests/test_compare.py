@@ -9,19 +9,21 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from deca_mlx.backend import mlx_available
 from deca_mlx.compare import compare_arrays, load_baseline
 from deca_mlx.config import default_config
-from deca_mlx.deca import DECA, to_numpy
 from deca_mlx.preprocess import load_image
 
 BASELINE = ROOT / "tests" / "baselines" / "IMG_0392.npz"
 FACE = ROOT / "tests" / "faces" / "IMG_0392_inputs.jpg"
 
 
+@pytest.mark.skipif(not mlx_available(), reason="mlx is not installed")
 @pytest.mark.skipif(not BASELINE.exists(), reason="encoder baseline NPZ is not present")
 @pytest.mark.skipif(not default_config().mlx_weights_path.exists(), reason="MLX weights are not converted")
 def test_encoder_matches_official_checkpoint():
     import mlx.core as mx
+    from deca_mlx.deca import DECA, to_numpy
 
     baseline = load_baseline(BASELINE)
     sample = load_image(FACE, iscrop=False)

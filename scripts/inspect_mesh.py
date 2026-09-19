@@ -6,15 +6,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import mlx.core as mx
 import numpy as np
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from deca_mlx.backend import create_deca
 from deca_mlx.compare import compare_arrays, format_report, load_baseline
-from deca_mlx.deca import DECA, to_numpy
 from deca_mlx.render import Renderer, visualize_reconstruction
 
 
@@ -28,25 +27,25 @@ def _label(image: Image.Image, text: str) -> Image.Image:
 
 def main() -> None:
     baseline = load_baseline()
-    deca = DECA().load_pretrained()
-    images = mx.array(baseline["image"][None, ...])
+    deca = create_deca().load_pretrained()
+    images = deca.asarray(baseline["image"][None, ...])
     codedict = deca.encode(images, use_detail=True)
     opdict = deca.decode(codedict, use_detail=True)
     pred = {
-        "verts": to_numpy(opdict["verts"])[0],
-        "landmarks2d": to_numpy(opdict["landmarks2d"])[0],
-        "landmarks3d": to_numpy(opdict["landmarks3d"])[0],
-        "displacement_map": to_numpy(opdict["displacement_map"])[0],
+        "verts": deca.to_numpy(opdict["verts"])[0],
+        "landmarks2d": deca.to_numpy(opdict["landmarks2d"])[0],
+        "landmarks3d": deca.to_numpy(opdict["landmarks3d"])[0],
+        "displacement_map": deca.to_numpy(opdict["displacement_map"])[0],
     }
     renderer = Renderer()
     vis = visualize_reconstruction(
         baseline["image"],
         pred["verts"],
-        to_numpy(opdict["trans_verts"])[0],
+        deca.to_numpy(opdict["trans_verts"])[0],
         pred["landmarks2d"],
         pred["landmarks3d"],
-        lights=to_numpy(codedict["light"])[0],
-        tex_code=to_numpy(codedict["tex"])[0],
+        lights=deca.to_numpy(codedict["light"])[0],
+        tex_code=deca.to_numpy(codedict["tex"])[0],
         displacement=pred["displacement_map"],
         renderer=renderer,
     )

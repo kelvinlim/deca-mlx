@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from deca_mlx.config import default_config
-from deca_mlx.flame import _load_flame_pickle, _to_np
+from deca_mlx.flame_io import flame_to_numpy as _to_np
+from deca_mlx.flame_io import load_flame_pickle as _load_flame_pickle
 
 
 def batch_rodrigues(rot_vecs: torch.Tensor) -> torch.Tensor:

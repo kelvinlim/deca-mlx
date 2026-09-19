@@ -1,50 +1,57 @@
-"""DECA encode / decode on MLX."""
+"""DECA encode / decode on PyTorch (CUDA, ROCm via ``cuda``, or CPU)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import mlx.core as mx
-import mlx.nn as nn
 import numpy as np
+import torch
+import torch.nn as nn
 
-from .config import DECAConfig, default_config
+from ..config import DECAConfig, default_config
+from ..export import load_obj, upsample_mesh, vertex_normals, write_obj
 from .decoders import Generator
 from .encoders import ResnetEncoder
-from .export import load_obj, upsample_mesh, vertex_normals, write_obj
 from .flame import FLAME
 
 
-def decompose_code(code: mx.array, sizes: dict[str, int]) -> dict[str, mx.array]:
+def decompose_code(code: torch.Tensor, sizes: dict[str, int]) -> dict[str, torch.Tensor]:
     code_dict = {}
     start = 0
     for key, size in sizes.items():
         end = start + size
         value = code[:, start:end]
         if key == "light":
-            value = value.reshape((value.shape[0], 9, 3))
+            value = value.reshape(value.shape[0], 9, 3)
         code_dict[key] = value
         start = end
     return code_dict
 
 
-def batch_orth_proj(points: mx.array, camera: mx.array) -> mx.array:
-    camera = camera.reshape((-1, 1, 3))
-    translated = mx.concatenate([points[:, :, :2] + camera[:, :, 1:], points[:, :, 2:]], axis=2)
-    return camera[:, :, 0:1] * translated
+def batch_orth_proj(points: torch.Tensor, camera: torch.Tensor) -> torch.Tensor:
+    camera = camera.reshape(-1, 1, 3)
+    translated = torch.cat([points[:, :, :2] + camera[:, :, 1:], points[:, :, 2:]], dim=2)
+    return camera[:, :, :1] * translated
 
 
-def to_numpy(array: mx.array) -> np.ndarray:
-    mx.eval(array)
-    return np.array(array)
+def default_torch_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
 
 
 class DECA(nn.Module):
-    backend_name = "mlx"
+    backend_name = "torch"
 
-    def __init__(self, config: DECAConfig | None = None, load_flame: bool | None = None):
+    def __init__(
+        self,
+        config: DECAConfig | None = None,
+        load_flame: bool | None = None,
+        device: str | torch.device | None = None,
+    ):
         super().__init__()
         self.cfg = config or default_config()
+        self.device = torch.device(device) if device is not None else default_torch_device()
         self.E_flame = ResnetEncoder(outsize=self.cfg.n_param)
         self.E_detail = ResnetEncoder(outsize=self.cfg.n_detail)
         self.D_detail = Generator(
@@ -66,30 +73,41 @@ class DECA(nn.Module):
         self.dense_template = None
         if self.cfg.dense_template_path.exists():
             self.dense_template = np.load(self.cfg.dense_template_path, allow_pickle=True, encoding="latin1").item()
+        self.to(self.device)
         self.eval()
 
-    def asarray(self, array) -> mx.array:
-        if hasattr(array, "dtype") and not isinstance(array, np.ndarray):
-            return array
-        return mx.array(array)
+    def asarray(self, array) -> torch.Tensor:
+        if isinstance(array, torch.Tensor):
+            return array.to(self.device)
+        return torch.from_numpy(np.asarray(array, dtype=np.float32)).to(self.device)
 
     def to_numpy(self, array) -> np.ndarray:
         if isinstance(array, np.ndarray):
             return array
-        return to_numpy(array)
+        return array.detach().cpu().numpy()
 
     def load_pretrained(self, path: str | Path | None = None) -> "DECA":
-        weights_path = Path(path or self.cfg.mlx_weights_path)
+        weights_path = Path(path or self.cfg.pretrained_modelpath)
+        if weights_path.suffix in {".safetensors", ".mlx"}:
+            raise ValueError(
+                f"The torch/ROCm backend loads official deca_model.tar, not {weights_path.name}. "
+                "Pass the tar path or omit --weights."
+            )
         if not weights_path.exists():
             raise FileNotFoundError(
-                f"MLX weights not found at {weights_path}. Run `python -m deca_mlx.convert` first."
+                f"Official DECA checkpoint not found at {weights_path}. "
+                "Download deca_model.tar into data/."
             )
-        self.load_weights(str(weights_path), strict=False)
+        checkpoint = torch.load(weights_path, map_location="cpu", weights_only=False)
+        self.E_flame.load_state_dict(checkpoint["E_flame"])
+        self.E_detail.load_state_dict(checkpoint["E_detail"])
+        self.D_detail.load_state_dict(checkpoint["D_detail"])
+        self.to(self.device)
         self.eval()
-        mx.eval(self.parameters())
         return self
 
-    def encode(self, images: mx.array, use_detail: bool = True) -> dict[str, mx.array]:
+    def encode(self, images, use_detail: bool = True) -> dict[str, torch.Tensor]:
+        images = self.asarray(images)
         parameters = self.E_flame(images)
         codedict = decompose_code(parameters, self.cfg.param_sizes)
         codedict["images"] = images
@@ -97,7 +115,7 @@ class DECA(nn.Module):
             codedict["detail"] = self.E_detail(images)
         return codedict
 
-    def decode(self, codedict: dict[str, mx.array], use_detail: bool = True) -> dict[str, mx.array]:
+    def decode(self, codedict: dict[str, torch.Tensor], use_detail: bool = True) -> dict[str, torch.Tensor]:
         if self.flame is None:
             raise RuntimeError("FLAME model is not loaded; cannot decode vertices.")
         verts, landmarks2d, landmarks3d = self.flame(
@@ -107,11 +125,11 @@ class DECA(nn.Module):
         )
         landmarks3d_world = landmarks3d
         landmarks2d = batch_orth_proj(landmarks2d, codedict["cam"])[:, :, :2]
-        landmarks2d = mx.concatenate([landmarks2d[:, :, :1], -landmarks2d[:, :, 1:]], axis=2)
+        landmarks2d = torch.cat([landmarks2d[:, :, :1], -landmarks2d[:, :, 1:]], dim=2)
         landmarks3d = batch_orth_proj(landmarks3d, codedict["cam"])
-        landmarks3d = mx.concatenate([landmarks3d[:, :, :1], -landmarks3d[:, :, 1:]], axis=2)
+        landmarks3d = torch.cat([landmarks3d[:, :, :1], -landmarks3d[:, :, 1:]], dim=2)
         trans_verts = batch_orth_proj(verts, codedict["cam"])
-        trans_verts = mx.concatenate([trans_verts[:, :, :1], -trans_verts[:, :, 1:]], axis=2)
+        trans_verts = torch.cat([trans_verts[:, :, :1], -trans_verts[:, :, 1:]], dim=2)
         opdict = {
             "verts": verts,
             "trans_verts": trans_verts,
@@ -120,23 +138,22 @@ class DECA(nn.Module):
             "landmarks3d_world": landmarks3d_world,
         }
         if use_detail:
-            cond = mx.concatenate([codedict["pose"][:, 3:], codedict["exp"], codedict["detail"]], axis=1)
+            cond = torch.cat([codedict["pose"][:, 3:], codedict["exp"], codedict["detail"]], dim=1)
             uv_z = self.D_detail(cond)
-            # Generator emits NHWC; keep a CHW map for the official baseline layout.
-            displacement = uv_z.transpose(0, 3, 1, 2)
+            displacement = uv_z
             if self.fixed_uv_dis is not None:
-                displacement = displacement + mx.array(self.fixed_uv_dis)[None, None, :, :]
+                displacement = displacement + self.asarray(self.fixed_uv_dis)[None, None, :, :]
             opdict["uv_z"] = uv_z
             opdict["displacement_map"] = displacement
         return opdict
 
-    def save_obj(self, filename: str | Path, opdict: dict[str, mx.array]) -> list[Path]:
+    def save_obj(self, filename: str | Path, opdict: dict) -> list[Path]:
         if self.faces is None:
             raise RuntimeError("head_template.obj is required to export meshes.")
-        verts = to_numpy(opdict["verts"][0])
+        verts = self.to_numpy(opdict["verts"][0])
         written = [write_obj(filename, verts, self.faces)]
         if "displacement_map" in opdict and self.dense_template is not None:
-            displacement = to_numpy(opdict["displacement_map"][0, 0])
+            displacement = self.to_numpy(opdict["displacement_map"][0, 0])
             normals = vertex_normals(verts, self.faces)
             dense_vertices, dense_colors, dense_faces = upsample_mesh(
                 verts, normals, displacement, None, self.dense_template

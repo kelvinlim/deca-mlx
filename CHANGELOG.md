@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.0] - 2026-09-19
+
+### Added
+
+- PyTorch inference backend for ROCm / CUDA / CPU. Same encode / FLAME / detail / OBJ / vis path as MLX; loads official `deca_model.tar` directly.
+- `--backend auto|mlx|torch` (aliases `rocm`, `cuda`) and `DECA_BACKEND`. Auto prefers MLX, then PyTorch.
+- `deca_mlx.torch_backend` plus a shared chumpy-free FLAME pickle loader.
+- Install and usage docs for Apple MLX and AMD ROCm (`docs/install.md`, `docs/usage.md`).
+
+### Changed
+
+- `mlx` is an optional `[apple]` extra so Linux/ROCm installs do not require Metal.
+- Demo no longer imports MLX at module load.
+
 ## [0.1.0] - 2026-09-18
 
 First working native MLX inference port of [yfeng95/DECA](https://github.com/yfeng95/DECA). Reconstruction runs on Apple Silicon via `mlx.core` / `mlx.nn` (Metal). Training and expression transfer are still out of scope.

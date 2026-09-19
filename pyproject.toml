@@ -1,11 +1,10 @@
 [project]
 name = "deca-mlx"
-version = "0.1.0"
-description = "Native MLX inference port of DECA"
+version = "0.2.0"
+description = "DECA inference on Apple MLX and PyTorch (ROCm / CUDA / CPU)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "mlx",
   "numpy",
   "pillow",
   "opencv-python-headless",
@@ -15,7 +14,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+apple = ["mlx"]
 convert = ["torch"]
+torch = ["torch"]
 dev = ["pytest"]
 
 [project.scripts]
